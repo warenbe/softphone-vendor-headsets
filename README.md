@@ -96,7 +96,7 @@ params:
       conversationId: string,
       contactName?: string
     }
-  * `conversationId: string`: Required: Most of the vendors use conversation or call ids in order to help maintain proper state of the headset. This is the conversationId associated with the incoming call.
+  * `conversationId: string`: Required: Most of the vendors use conversation or call ids in order to help maintain proper state of the headset. This is the conversationId associated with the outgoing  call.
   * `contactName: string`: Optional: Some vendors will announce the caller through the headset if the `contactName` is provided.
 <br/><br/><br/>
 

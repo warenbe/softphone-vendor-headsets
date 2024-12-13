@@ -36,16 +36,16 @@ export default class JabraService extends VendorImplementation {
   pendingConversationIsOutbound: boolean;
   activeConversationId: string;
 
-  private constructor (config: ImplementationConfig) {
+  private constructor(config: ImplementationConfig) {
     super(config);
     this.vendorName = 'Jabra';
   }
 
-  isSupported (): boolean {
+  isSupported(): boolean {
     return (window.navigator as any).hid && !isCefHosted();
   }
 
-  deviceLabelMatchesVendor (label: string): boolean {
+  deviceLabelMatchesVendor(label: string): boolean {
     const lowerLabel = label.toLowerCase();
     if (['jabra'].some((searchVal) => lowerLabel.includes(searchVal))) {
       return true;
@@ -53,7 +53,7 @@ export default class JabraService extends VendorImplementation {
     return false;
   }
 
-  static getInstance (config: ImplementationConfig): JabraService {
+  static getInstance(config: ImplementationConfig): JabraService {
     if (!JabraService.instance || config.createNew) {
       JabraService.instance = new JabraService(config);
     }
@@ -61,24 +61,24 @@ export default class JabraService extends VendorImplementation {
     return JabraService.instance;
   }
 
-  get deviceInfo (): DeviceInfo {
+  get deviceInfo(): DeviceInfo {
     return this._deviceInfo;
   }
 
-  get deviceName (): string {
+  get deviceName(): string {
     return this.deviceInfo?.deviceName;
   }
 
-  get isDeviceAttached (): boolean {
+  get isDeviceAttached(): boolean {
     return !!this.deviceInfo;
   }
 
-  resetState (): void {
+  resetState(): void {
     this.setHold(null, false);
     this.setMute(false);
   }
 
-  _processEvents (callControl: ICallControl): void {
+  _processEvents(callControl: ICallControl): void {
     this.headsetEventSubscription = callControl.deviceSignals.subscribe(async (signal) => {
       if (!this.callLock) {
         this.logger.debug(
@@ -88,94 +88,94 @@ export default class JabraService extends VendorImplementation {
       }
 
       switch (signal.type) {
-      case SignalType.HOOK_SWITCH:
-        // do nothing when the end call button is pressed and we have an incoming call while we have an active call
-        if (this.activeConversationId && this.pendingConversationId) {
-          this.logger.info('ignoring hookswitch event because there is an active and incoming call');
-          break;
-        }
+        case SignalType.HOOK_SWITCH:
+          // do nothing when the end call button is pressed and we have an incoming call while we have an active call
+          if (this.activeConversationId && this.pendingConversationId) {
+            this.logger.info('ignoring hookswitch event because there is an active and incoming call');
+            break;
+          }
 
-        if (signal.value) {
-          callControl.offHook(true);
-          callControl.ring(false);
-          this.activeConversationId = this.pendingConversationId;
-          this.pendingConversationId = null;
-          if (!this.pendingConversationIsOutbound) {
-            this.deviceAnsweredCall({
-              name: 'CallOffHook',
+          if (signal.value) {
+            callControl.offHook(true);
+            callControl.ring(false);
+            this.activeConversationId = this.pendingConversationId;
+            this.pendingConversationId = null;
+            if (!this.pendingConversationIsOutbound) {
+              this.deviceAnsweredCall({
+                name: 'CallOffHook',
+                code: signal.type,
+                conversationId: this.activeConversationId,
+              });
+            }
+          } else {
+            callControl.mute(false);
+            callControl.hold(false);
+            callControl.offHook(false);
+            this.deviceEndedCall({
+              name: 'CallOnHook',
               code: signal.type,
               conversationId: this.activeConversationId,
             });
+            try {
+              callControl.releaseCallLock();
+            } catch ({ message, type }: any) {
+              if (this.checkForCallLockError(message, type)) {
+                this.logger.info(message);
+              } else {
+                this.logger.error(type, message);
+              }
+            } finally {
+              this.activeConversationId = null;
+              this.callLock = false;
+            }
           }
-        } else {
-          callControl.mute(false);
-          callControl.hold(false);
-          callControl.offHook(false);
-          this.deviceEndedCall({
-            name: 'CallOnHook',
+          break;
+        case SignalType.FLASH:
+        case SignalType.ALT_HOLD:
+          this.isHeld = !this.isHeld;
+          callControl.hold(this.isHeld);
+          this.deviceHoldStatusChanged({
+            holdRequested: this.isHeld,
+            name: this.isHeld ? 'OnHold' : 'ResumeCall',
             code: signal.type,
             conversationId: this.activeConversationId,
           });
+          break;
+        case SignalType.PHONE_MUTE:
+          this.isMuted = !this.isMuted;
+          callControl.mute(this.isMuted);
+          this.deviceMuteChanged({
+            isMuted: this.isMuted,
+            name: this.isMuted ? 'CallMuted' : 'CallUnmuted',
+            code: signal.type,
+            conversationId: this.activeConversationId,
+          });
+          break;
+        case SignalType.REJECT_CALL:
+          callControl.ring(false);
+          this.deviceRejectedCall({
+            name: SignalType[signal.type],
+            conversationId: this.pendingConversationId,
+          });
+          this.pendingConversationId = null;
           try {
-            callControl.releaseCallLock();
-          } catch ({ message, type }) {
+            // we only want to release call controls if there isn't another call active
+            if (!this.activeConversationId) {
+              callControl.releaseCallLock();
+              this.callLock = false;
+            }
+          } catch ({ message, type }: any) {
             if (this.checkForCallLockError(message, type)) {
               this.logger.info(message);
             } else {
               this.logger.error(type, message);
             }
-          } finally {
-            this.activeConversationId = null;
-            this.callLock = false;
           }
-        }
-        break;
-      case SignalType.FLASH:
-      case SignalType.ALT_HOLD:
-        this.isHeld = !this.isHeld;
-        callControl.hold(this.isHeld);
-        this.deviceHoldStatusChanged({
-          holdRequested: this.isHeld,
-          name: this.isHeld ? 'OnHold' : 'ResumeCall',
-          code: signal.type,
-          conversationId: this.activeConversationId,
-        });
-        break;
-      case SignalType.PHONE_MUTE:
-        this.isMuted = !this.isMuted;
-        callControl.mute(this.isMuted);
-        this.deviceMuteChanged({
-          isMuted: this.isMuted,
-          name: this.isMuted ? 'CallMuted' : 'CallUnmuted',
-          code: signal.type,
-          conversationId: this.activeConversationId,
-        });
-        break;
-      case SignalType.REJECT_CALL:
-        callControl.ring(false);
-        this.deviceRejectedCall({
-          name: SignalType[signal.type],
-          conversationId: this.pendingConversationId,
-        });
-        this.pendingConversationId = null;
-        try {
-          // we only want to release call controls if there isn't another call active
-          if (!this.activeConversationId) {
-            callControl.releaseCallLock();
-            this.callLock = false;
-          }
-        } catch ({ message, type }) {
-          if (this.checkForCallLockError(message, type)) {
-            this.logger.info(message);
-          } else {
-            this.logger.error(type, message);
-          }
-        }
       }
     });
   }
 
-  async setMute (value: boolean): Promise<void> {
+  async setMute(value: boolean): Promise<void> {
     if (!this.callLock) {
       return;
     }
@@ -183,7 +183,7 @@ export default class JabraService extends VendorImplementation {
     this.callControl.mute(value);
   }
 
-  async setHold (conversationId: string, value: boolean): Promise<void> {
+  async setHold(conversationId: string, value: boolean): Promise<void> {
     if (!this.callLock) {
       return;
     }
@@ -191,12 +191,12 @@ export default class JabraService extends VendorImplementation {
     this.callControl.hold(value);
   }
 
-  async incomingCall (callInfo: CallInfo): Promise<void> {
+  async incomingCall(callInfo: CallInfo): Promise<void> {
     this.pendingConversationId = callInfo.conversationId;
     this.pendingConversationIsOutbound = false;
     try {
       this.callLock = await this.callControl.takeCallLock();
-    } catch ({ message, type }) {
+    } catch ({ message, type }: any) {
       if (this.checkForCallLockError(message, type)) {
         this.logger.info(message);
         this.callLock = true;
@@ -210,12 +210,12 @@ export default class JabraService extends VendorImplementation {
     }
   }
 
-  async answerCall (conversationId: string, autoAnswer?: boolean): Promise<void> {
+  async answerCall(conversationId: string, autoAnswer?: boolean): Promise<void> {
     if (autoAnswer) {
       this.pendingConversationId = conversationId;
       try {
         this.callLock = await this.callControl.takeCallLock();
-      } catch ({ message, type }) {
+      } catch ({ message, type }: any) {
         if (this.checkForCallLockError(message, type)) {
           this.logger.info(message);
           this.callLock = true;
@@ -233,7 +233,7 @@ export default class JabraService extends VendorImplementation {
     this.callControl.offHook(true);
   }
 
-  async rejectCall (): Promise<void> {
+  async rejectCall(): Promise<void> {
     if (!this.callLock) {
       return this.logger.info(
         'Currently not in possession of the Call Lock; Cannot react to Device Actions'
@@ -245,7 +245,7 @@ export default class JabraService extends VendorImplementation {
       try {
         this.resetState();
         this.callControl.releaseCallLock();
-      } catch ({ message, type }) {
+      } catch ({ message, type }: any) {
         if (this.checkForCallLockError(message, type)) {
           this.logger.info(message);
         } else {
@@ -258,10 +258,10 @@ export default class JabraService extends VendorImplementation {
     }
   }
 
-  async outgoingCall (callInfo: CallInfo): Promise<void> {
+  async outgoingCall(callInfo: CallInfo): Promise<void> {
     try {
       this.callLock = await this.callControl.takeCallLock();
-    } catch ({ message, type }) {
+    } catch ({ message, type }: any) {
       if (this.checkForCallLockError(message, type)) {
         this.logger.info(message);
         this.callLock = true;
@@ -277,7 +277,7 @@ export default class JabraService extends VendorImplementation {
     }
   }
 
-  async endCall (conversationId: string, hasOtherActiveCalls: boolean): Promise<void> {
+  async endCall(conversationId: string, hasOtherActiveCalls: boolean): Promise<void> {
     if (hasOtherActiveCalls) {
       return;
     }
@@ -295,7 +295,7 @@ export default class JabraService extends VendorImplementation {
       this.callControl.offHook(false);
       this.resetState();
       this.callControl.releaseCallLock();
-    } catch ({ message, type }) {
+    } catch ({ message, type }: any) {
       if (this.checkForCallLockError(message, type)) {
         this.logger.info(message);
       } else {
@@ -306,7 +306,7 @@ export default class JabraService extends VendorImplementation {
     }
   }
 
-  async endAllCalls (): Promise<void> {
+  async endAllCalls(): Promise<void> {
     try {
       if (!this.callLock) {
         return this.logger.info(
@@ -317,7 +317,7 @@ export default class JabraService extends VendorImplementation {
       this.callControl.offHook(false);
       this.resetState();
       this.callControl.releaseCallLock();
-    } catch ({ message, type }) {
+    } catch ({ message, type }: any) {
       if (this.checkForCallLockError(message, type)) {
         this.logger.info(message);
       } else {
@@ -328,11 +328,11 @@ export default class JabraService extends VendorImplementation {
     }
   }
 
-  isDeviceInList (device: IDevice, deviceLabel: string): boolean {
+  isDeviceInList(device: IDevice, deviceLabel: string): boolean {
     return deviceLabel.toLowerCase().includes(device?.name?.toLowerCase());
   }
 
-  async connect (originalDeviceLabel: string): Promise<void> {
+  async connect(originalDeviceLabel: string): Promise<void> {
     if (this.isConnecting) {
       return;
     }
@@ -378,7 +378,7 @@ export default class JabraService extends VendorImplementation {
     this.changeConnectionStatus({ isConnected: true, isConnecting: false });
   }
 
-  async deviceHasPermissions (deviceLabel: string): Promise<boolean> {
+  async deviceHasPermissions(deviceLabel: string): Promise<boolean> {
     const allowedHIDDevices = await (window.navigator as any).hid.getDevices();
     let deviceFound = false;
     allowedHIDDevices.forEach(device => {
@@ -389,7 +389,7 @@ export default class JabraService extends VendorImplementation {
     return deviceFound;
   }
 
-  async getPreviouslyConnectedDevice (deviceLabel: string): Promise<IDevice> {
+  async getPreviouslyConnectedDevice(deviceLabel: string): Promise<IDevice> {
     const waitForDevice: Observable<IDevice> = this.jabraSdk.deviceList.pipe(
       defaultIfEmpty(null),
       first((devices: IDevice[]) => !!devices.length),
@@ -409,7 +409,7 @@ export default class JabraService extends VendorImplementation {
     });
   }
 
-  async getDeviceFromWebhid (deviceLabel: string): Promise<IDevice> {
+  async getDeviceFromWebhid(deviceLabel: string): Promise<IDevice> {
     this.requestWebHidPermissions(webHidPairing);
 
     return firstValueFrom(
@@ -431,7 +431,7 @@ export default class JabraService extends VendorImplementation {
   }
 
   /* istanbul ignore next */
-  async initializeJabraSdk (): Promise<IApi> {
+  async initializeJabraSdk(): Promise<IApi> {
     return init({
       appId: 'softphone-vendor-headsets',
       appName: 'Softphone Headset Library',
@@ -440,17 +440,17 @@ export default class JabraService extends VendorImplementation {
   }
 
   /* istanbul ignore next */
-  createCallControlFactory (sdk: IApi): CallControlFactory {
+  createCallControlFactory(sdk: IApi): CallControlFactory {
     return new CallControlFactory(sdk);
   }
 
-  checkForCallLockError (message: unknown, type: unknown): boolean {
+  checkForCallLockError(message: unknown, type: unknown): boolean {
     return (
       (type as ErrorType) === ErrorType.SDK_USAGE_ERROR && (message as string).includes('call lock')
     );
   }
 
-  async resetHeadsetState (): Promise<void> {
+  async resetHeadsetState(): Promise<void> {
     if (!this.callControl) {
       return;
     }
@@ -466,7 +466,7 @@ export default class JabraService extends VendorImplementation {
     }
   }
 
-  async disconnect (): Promise<void> {
+  async disconnect(): Promise<void> {
     try {
       if (!this.callLock) {
         return this.logger.info(
@@ -474,7 +474,7 @@ export default class JabraService extends VendorImplementation {
         );
       }
       this.callControl.releaseCallLock();
-    } catch ({ message, type }) {
+    } catch ({ message, type }: any) {
       if (this.checkForCallLockError(message, type)) {
         this.logger.info(message);
       } else {

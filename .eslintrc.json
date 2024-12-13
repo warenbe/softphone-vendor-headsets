@@ -19,14 +19,7 @@
     "@typescript-eslint/no-var-requires": 1,
     "no-prototype-builtins": 0,
     "@typescript-eslint/no-explicit-any": 0,
-    "indent": ["error", 2],
-    "semi": 2,
-    "key-spacing": ["error", {
-      "beforeColon": false,
-      "afterColon": true
-    }],
-    "object-curly-spacing": ["error", "always"],
-    "space-before-function-paren": ["error", "always"]
+    "semi": 2
   },
   "ignorePatterns": [
     "**/jabra-*/*.ts"
